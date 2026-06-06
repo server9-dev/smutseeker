@@ -1,0 +1,16 @@
+{
+  "name": "smutseeker-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.102.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260606.1",
+    "wrangler": "^4.98.0"
+  }
+}

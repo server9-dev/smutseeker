@@ -1,4 +1,5 @@
 import type { Book } from './types'
+import { lookupRemote } from './rating/remote'
 
 /**
  * ISBN -> Book lookup with layered fallbacks (all browser-friendly / keyless):
@@ -50,7 +51,7 @@ export async function lookupIsbn(raw: string): Promise<Book | null> {
       }
     }
 
-    // 3. Open Library search index (last resort).
+    // 3. Open Library search index.
     if (!book) {
       for (const c of candidates) {
         try {
@@ -60,6 +61,11 @@ export async function lookupIsbn(raw: string): Promise<Book | null> {
           console.warn('Open Library search failed:', e)
         }
       }
+    }
+
+    // 4. Server-side providers (ISBNdb / Hardcover) via the Worker — the long tail.
+    if (!book) {
+      book = await lookupRemote(clean)
     }
 
     if (book) book.isbn = clean // display the ISBN the user actually scanned

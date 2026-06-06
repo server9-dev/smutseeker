@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@mlc-ai/web-llm": "^0.2.79",
     "@zxing/browser": "^0.1.5",
     "@zxing/library": "^0.21.3",
     "react": "^18.3.1",

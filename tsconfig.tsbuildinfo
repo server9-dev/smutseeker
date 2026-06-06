@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/Scanner.tsx","./src/lookup.ts","./src/main.tsx","./src/types.ts","./src/rating/ai.ts","./src/rating/heuristic.ts","./vite.config.ts"],"version":"5.9.3"}
+{"root":["./src/App.tsx","./src/Scanner.tsx","./src/lookup.ts","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/rating/heuristic.ts","./src/rating/remote.ts","./vite.config.ts"],"version":"5.9.3"}

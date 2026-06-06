@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react'
 import { Scanner } from './Scanner'
 import { lookupIsbn } from './lookup'
 import { rateHeuristic } from './rating/heuristic'
-import { aiAvailable, rateAI } from './rating/ai'
+import { rateRemote, RateLimited } from './rating/remote'
 import type { Book, DimensionKey, Rating } from './types'
 import { DIMENSION_LABELS, SPICE_LABELS } from './types'
 
@@ -14,7 +14,7 @@ export default function App() {
   const [rating, setRating] = useState<Rating | null>(null)
   const [error, setError] = useState('')
   const [manual, setManual] = useState('')
-  const [aiState, setAiState] = useState<{ busy: boolean; progress: string }>({ busy: false, progress: '' })
+  const [aiState, setAiState] = useState<{ busy: boolean; note: string }>({ busy: false, note: '' })
 
   const handleIsbn = useCallback(async (isbn: string) => {
     setPhase('looking-up')
@@ -36,16 +36,17 @@ export default function App() {
 
   const runAI = useCallback(async () => {
     if (!book) return
-    setAiState({ busy: true, progress: 'Starting…' })
+    setAiState({ busy: true, note: 'Asking Claude…' })
     try {
-      const r = await rateAI(book, (text, pct) =>
-        setAiState({ busy: true, progress: `${text}${pct ? ` (${Math.round(pct * 100)}%)` : ''}` }),
-      )
+      const r = await rateRemote(book)
       setRating(r)
+      setAiState({ busy: false, note: '' })
     } catch (e) {
-      setError(String((e as Error)?.message ?? e))
-    } finally {
-      setAiState({ busy: false, progress: '' })
+      if (e instanceof RateLimited) {
+        setAiState({ busy: false, note: `Rate limit reached — try again in ${e.retryAfter}s. (Heuristic shown.)` })
+      } else {
+        setAiState({ busy: false, note: 'AI rating unavailable right now. (Heuristic shown.)' })
+      }
     }
   }, [book])
 
@@ -130,13 +131,12 @@ export default function App() {
           onReset={reset}
           onRunAI={runAI}
           aiBusy={aiState.busy}
-          aiProgress={aiState.progress}
-          canRunAI={aiAvailable()}
+          aiNote={aiState.note}
         />
       )}
 
       <footer className="footer">
-        Ratings are heuristic / on-device AI guesses from public metadata — not gospel.
+        Ratings are heuristic or AI guesses from public metadata — not gospel.
       </footer>
     </div>
   )
@@ -148,16 +148,14 @@ function Result({
   onReset,
   onRunAI,
   aiBusy,
-  aiProgress,
-  canRunAI,
+  aiNote,
 }: {
   book: Book
   rating: Rating
   onReset: () => void
   onRunAI: () => void
   aiBusy: boolean
-  aiProgress: string
-  canRunAI: boolean
+  aiNote: string
 }) {
   return (
     <div className="card stack">
@@ -192,15 +190,12 @@ function Result({
         })}
       </div>
 
-      {rating.source !== 'ai' && canRunAI && (
+      {rating.source !== 'ai' && (
         <button className="btn btn-primary" onClick={onRunAI} disabled={aiBusy}>
-          {aiBusy ? '🧠 Analyzing…' : '🧠 Analyze with on-device AI'}
+          {aiBusy ? '🧠 Asking Claude…' : '🧠 Analyze with AI'}
         </button>
       )}
-      {rating.source !== 'ai' && !canRunAI && (
-        <p className="meta">On-device AI needs WebGPU (iOS 18+, recent Chrome/Edge). Showing heuristic.</p>
-      )}
-      {aiBusy && <p className="meta progress">{aiProgress}</p>}
+      {aiNote && <p className="meta progress">{aiNote}</p>}
 
       <button className="btn ghost" onClick={onReset}>Scan another</button>
     </div>

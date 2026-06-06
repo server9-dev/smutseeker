@@ -1,0 +1,14 @@
+name = "smutseeker-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# KV namespace id is filled in by `wrangler kv namespace create RL` (see README).
+[[kv_namespaces]]
+binding = "RL"
+id = "c6ea5f39987c4826842305f020ace495"
+
+# Secrets (set via `wrangler secret put`, never committed):
+#   ANTHROPIC_API_KEY  — required, powers the Haiku rating
+#   ISBNDB_KEY         — optional, enables the ISBNdb lookup leg
+#   HARDCOVER_TOKEN    — optional, enables the Hardcover lookup leg
