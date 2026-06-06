@@ -1,0 +1,12 @@
+{
+  "name": "SmutSeeker",
+  "short_name": "SmutSeeker",
+  "description": "Scan a book's ISBN and see how spicy it is — content rating with a brief explanation.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1320",
+  "theme_color": "#1a1320",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

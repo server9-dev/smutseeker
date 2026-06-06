@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/Scanner.tsx","./src/googleBooks.ts","./src/main.tsx","./src/types.ts","./src/rating/ai.ts","./src/rating/heuristic.ts","./vite.config.ts"],"version":"5.9.3"}
