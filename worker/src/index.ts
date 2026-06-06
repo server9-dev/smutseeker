@@ -127,36 +127,40 @@ async function fromIsbndb(isbn: string, env: Env): Promise<Book | null> {
   }
 }
 
-// Hardcover's GraphQL schema is community-maintained; this query targets the
-// common shape. If a field name drifts, adjust here — the rest is unaffected.
+// Verified against the live Hardcover schema: description lives on `book`,
+// authors come from `cached_contributors`, image/url from `cached_image`, and
+// `book.cached_tags` is keyed by category — crucially including "Content Warning".
 const HARDCOVER_QUERY = `query ($isbn: String!) {
   editions(where: { isbn_13: { _eq: $isbn } }, limit: 1) {
     title
-    description
-    image { url }
+    subtitle
+    pages
+    release_year
+    cached_image
+    cached_contributors
     book {
       title
       description
-      contributions { author { name } }
       cached_tags
     }
   }
 }`
 
+// Pull Genre / Content Warning / Mood tags; content warnings are the most useful
+// signal for adult-content rating, so prefix them so the rater notices.
 function extractHardcoverTags(cached: unknown): string[] {
-  // cached_tags is a JSON blob; pull any human-readable tag names defensively.
+  if (!cached || typeof cached !== 'object') return []
+  const c = cached as Record<string, Array<{ tag?: string }>>
   const out: string[] = []
-  const walk = (v: unknown) => {
-    if (!v) return
-    if (Array.isArray(v)) v.forEach(walk)
-    else if (typeof v === 'object') {
-      const o = v as Record<string, unknown>
-      if (typeof o.tag === 'string') out.push(o.tag)
-      else Object.values(o).forEach(walk)
+  for (const category of ['Content Warning', 'Genre', 'Mood']) {
+    const arr = c[category]
+    if (Array.isArray(arr)) {
+      for (const t of arr) {
+        if (t?.tag) out.push(category === 'Content Warning' ? `Content warning: ${t.tag}` : t.tag)
+      }
     }
   }
-  walk(cached)
-  return [...new Set(out)].slice(0, 25)
+  return out.slice(0, 30)
 }
 
 async function fromHardcover(isbn: string, env: Env): Promise<Book | null> {
@@ -167,23 +171,24 @@ async function fromHardcover(isbn: string, env: Env): Promise<Book | null> {
     body: JSON.stringify({ query: HARDCOVER_QUERY, variables: { isbn } }),
   })
   if (!res.ok) return null
-  const data = (await res.json()) as {
-    data?: { editions?: Array<Record<string, any>> }
-  }
+  const data = (await res.json()) as { data?: { editions?: Array<Record<string, any>> } }
   const ed = data?.data?.editions?.[0]
   if (!ed) return null
   const book = ed.book ?? {}
-  const authors = ((book.contributions as Array<any>) ?? [])
-    .map((c) => c?.author?.name)
+  const authors = (Array.isArray(ed.cached_contributors) ? ed.cached_contributors : [])
+    .map((c: any) => c?.author?.name)
     .filter((n: unknown): n is string => Boolean(n))
+  const title = ed.title ? (ed.subtitle ? `${ed.title}: ${ed.subtitle}` : ed.title) : book.title || 'Unknown title'
   return {
     isbn,
-    title: ed.title || book.title || 'Unknown title',
+    title,
     authors,
-    description: stripHtml(ed.description || book.description || ''),
+    description: stripHtml(book.description || ''),
     categories: extractHardcoverTags(book.cached_tags),
     maturityRating: 'UNKNOWN',
-    thumbnail: ed.image?.url,
+    thumbnail: ed.cached_image?.url,
+    publishedDate: ed.release_year ? String(ed.release_year) : undefined,
+    pageCount: ed.pages ?? undefined,
     source: 'hardcover',
   }
 }
@@ -195,19 +200,27 @@ async function handleBook(url: URL, env: Env, ip: string, headers: Record<string
   const isbn = (url.searchParams.get('isbn') ?? '').replace(/[^0-9Xx]/g, '').toUpperCase()
   if (isbn.length < 10) return json({ error: 'bad_isbn' }, 400, headers)
 
-  // ISBNdb first (broadest), Hardcover as the richer-metadata fallback.
-  // Prefer the first result that actually carries a description.
-  let book: Book | null = null
-  for (const provider of [fromIsbndb, fromHardcover]) {
-    try {
-      const found = await provider(isbn, env)
-      if (found && (found.description || !book)) book = found
-      if (book?.description) break
-    } catch (e) {
-      console.warn('lookup provider failed:', e)
+  // Fetch both in parallel: ISBNdb has the broadest catalog + publisher blurb;
+  // Hardcover contributes community "Content Warning"/Genre tags — the single
+  // best signal for adult-content rating — so we merge them when both resolve.
+  const [isbndb, hardcover] = await Promise.all([
+    fromIsbndb(isbn, env).catch((e) => (console.warn('isbndb failed:', e), null)),
+    fromHardcover(isbn, env).catch((e) => (console.warn('hardcover failed:', e), null)),
+  ])
+
+  let book = isbndb ?? hardcover
+  if (!book) return json({ book: null }, 200, headers)
+
+  if (isbndb && hardcover) {
+    const categories = [...new Set([...(isbndb.categories ?? []), ...hardcover.categories])].slice(0, 40)
+    book = {
+      ...isbndb,
+      categories,
+      description: isbndb.description || hardcover.description,
+      thumbnail: isbndb.thumbnail || hardcover.thumbnail,
+      source: 'isbndb+hardcover',
     }
   }
-  if (!book) return json({ book: null }, 200, headers)
   return json({ book }, 200, headers)
 }
 
