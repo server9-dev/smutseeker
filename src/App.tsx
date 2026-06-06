@@ -26,29 +26,27 @@ export default function App() {
         return
       }
       setBook(found)
-      setRating(rateHeuristic(found))
+      setRating(rateHeuristic(found)) // instant estimate while the AI rating loads
       setPhase('result')
+
+      // Automatically upgrade to the Claude rating in the background.
+      setAiState({ busy: true, note: '' })
+      try {
+        const r = await rateRemote(found)
+        setRating(r)
+        setAiState({ busy: false, note: '' })
+      } catch (e) {
+        if (e instanceof RateLimited) {
+          setAiState({ busy: false, note: `Rate limit reached — showing a quick estimate. Try again in ${e.retryAfter}s.` })
+        } else {
+          setAiState({ busy: false, note: 'AI rating unavailable — showing a quick estimate.' })
+        }
+      }
     } catch (e) {
       setError(String((e as Error)?.message ?? e))
       setPhase('error')
     }
   }, [])
-
-  const runAI = useCallback(async () => {
-    if (!book) return
-    setAiState({ busy: true, note: 'Asking Claude…' })
-    try {
-      const r = await rateRemote(book)
-      setRating(r)
-      setAiState({ busy: false, note: '' })
-    } catch (e) {
-      if (e instanceof RateLimited) {
-        setAiState({ busy: false, note: `Rate limit reached — try again in ${e.retryAfter}s. (Heuristic shown.)` })
-      } else {
-        setAiState({ busy: false, note: 'AI rating unavailable right now. (Heuristic shown.)' })
-      }
-    }
-  }, [book])
 
   const reset = () => {
     setBook(null)
@@ -129,7 +127,6 @@ export default function App() {
           book={book}
           rating={rating}
           onReset={reset}
-          onRunAI={runAI}
           aiBusy={aiState.busy}
           aiNote={aiState.note}
         />
@@ -146,14 +143,12 @@ function Result({
   book,
   rating,
   onReset,
-  onRunAI,
   aiBusy,
   aiNote,
 }: {
   book: Book
   rating: Rating
   onReset: () => void
-  onRunAI: () => void
   aiBusy: boolean
   aiNote: string
 }) {
@@ -190,10 +185,10 @@ function Result({
         })}
       </div>
 
-      {rating.source !== 'ai' && (
-        <button className="btn btn-primary" onClick={onRunAI} disabled={aiBusy}>
-          {aiBusy ? '🧠 Asking Claude…' : '🧠 Analyze with AI'}
-        </button>
+      {aiBusy && (
+        <p className="meta progress">
+          <span className="dot-spin" /> Refining with AI…
+        </p>
       )}
       {aiNote && <p className="meta progress">{aiNote}</p>}
 

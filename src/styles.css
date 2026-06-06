@@ -146,6 +146,17 @@ body {
 
 .footer { text-align: center; color: var(--faint); font-size: 0.75rem; margin-top: auto; padding-top: 8px; }
 
+.dot-spin {
+  display: inline-block;
+  width: 11px; height: 11px;
+  vertical-align: -1px;
+  margin-right: 6px;
+  border: 2px solid var(--elevated);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
 .spinner {
   width: 32px; height: 32px;
   border: 3px solid var(--elevated);
