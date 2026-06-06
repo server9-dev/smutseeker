@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { Scanner } from './Scanner'
-import { lookupIsbn } from './googleBooks'
+import { lookupIsbn } from './lookup'
 import { rateHeuristic } from './rating/heuristic'
 import { aiAvailable, rateAI } from './rating/ai'
 import type { Book, DimensionKey, Rating } from './types'
