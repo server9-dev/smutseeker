@@ -105,6 +105,19 @@ body {
 }
 .manual input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15); }
 
+.contrib-input {
+  width: 100%;
+  background: var(--bg-void);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--ink);
+  padding: 12px;
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+}
+.contrib-input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15); }
+
 /* Scanner */
 .scanner { position: relative; border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 12px; }
 .scanner-video { width: 100%; display: block; background: #000; aspect-ratio: 3/4; object-fit: cover; }

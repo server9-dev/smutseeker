@@ -209,6 +209,23 @@ async function handleBook(url: URL, env: Env, ip: string, headers: Record<string
   ])
 
   let book = isbndb ?? hardcover
+
+  // No public data anywhere → fall back to a community-contributed note if one exists.
+  if (!book) {
+    const note = await env.RL.get(`note:${isbn}`)
+    if (note) {
+      const n = JSON.parse(note) as { title?: string; authors?: string[]; text?: string }
+      book = {
+        isbn,
+        title: n.title || 'Untitled',
+        authors: n.authors ?? [],
+        description: n.text ?? '',
+        categories: [],
+        maturityRating: 'UNKNOWN',
+        source: 'community',
+      }
+    }
+  }
   if (!book) return json({ book: null }, 200, headers)
 
   if (isbndb && hardcover) {
@@ -297,11 +314,23 @@ async function rateWithClaude(book: Book, env: Env): Promise<unknown> {
   }
 }
 
-async function handleRate(request: Request, env: Env, ip: string, headers: Record<string, string>): Promise<Response> {
-  // Tighter limits + a global daily budget cap protects the live Anthropic key.
-  const retry = await enforce(env, ip, { perMin: 6, perDay: 40, global: 1500 })
-  if (retry) return limited(retry, headers)
+// Cache ratings by ISBN so repeat scans of the same book cost nothing.
+const RATING_TTL = 7776000 // 90 days
 
+async function cachedRating(env: Env, isbn: string): Promise<unknown | null> {
+  if (!isbn) return null
+  const v = await env.RL.get(`rating:${isbn}`)
+  return v ? JSON.parse(v) : null
+}
+async function storeRating(env: Env, isbn: string, rating: unknown): Promise<void> {
+  if (isbn) await env.RL.put(`rating:${isbn}`, JSON.stringify(rating), { expirationTtl: RATING_TTL })
+}
+
+function cleanIsbn(s: unknown): string {
+  return String(s ?? '').replace(/[^0-9Xx]/g, '').toUpperCase()
+}
+
+async function handleRate(request: Request, env: Env, ip: string, headers: Record<string, string>): Promise<Response> {
   let body: any
   try {
     body = await request.json()
@@ -311,11 +340,55 @@ async function handleRate(request: Request, env: Env, ip: string, headers: Recor
   const book = body?.book as Book | undefined
   if (!book || !book.title) return json({ error: 'bad_request' }, 400, headers)
 
+  const isbn = cleanIsbn(book.isbn)
+
+  // Cache hit → free, no Claude call, no rate-limit charge.
+  const hit = await cachedRating(env, isbn)
+  if (hit) return json({ rating: hit, cached: true }, 200, headers)
+
+  // Only real Claude calls are rate-limited / budget-capped.
+  const retry = await enforce(env, ip, { perMin: 6, perDay: 40, global: 1500 })
+  if (retry) return limited(retry, headers)
+
   try {
     const rating = await rateWithClaude(book, env)
+    await storeRating(env, isbn, rating)
     return json({ rating }, 200, headers)
   } catch (e: any) {
     console.error('rating failed:', e)
+    return json({ error: 'rating_failed', message: String(e?.message ?? e) }, 502, headers)
+  }
+}
+
+// User-submitted description for books with no public data. The text becomes the
+// rating AND is saved (note:<isbn>) so the next person who scans it sees it.
+async function handleContribute(request: Request, env: Env, ip: string, headers: Record<string, string>): Promise<Response> {
+  const retry = await enforce(env, ip, { perMin: 6, perDay: 40, global: 1500 })
+  if (retry) return limited(retry, headers)
+
+  let body: any
+  try {
+    body = await request.json()
+  } catch {
+    return json({ error: 'bad_json' }, 400, headers)
+  }
+  const isbn = cleanIsbn(body?.isbn)
+  const text = String(body?.text ?? '').trim().slice(0, 4000)
+  if (isbn.length < 10 || text.length < 10) return json({ error: 'bad_request' }, 400, headers)
+
+  const title = (String(body?.title ?? '').trim() || 'Untitled').slice(0, 300)
+  const authors = Array.isArray(body?.authors) ? (body.authors as unknown[]).map(String).slice(0, 10) : []
+  const book: Book = { isbn, title, authors, description: text, categories: [], maturityRating: 'UNKNOWN', source: 'community' }
+
+  // Persist the community note (no expiry) so future lookups resolve it.
+  await env.RL.put(`note:${isbn}`, JSON.stringify({ title, authors, text }))
+
+  try {
+    const rating = await rateWithClaude(book, env)
+    await storeRating(env, isbn, rating)
+    return json({ book, rating }, 200, headers)
+  } catch (e: any) {
+    console.error('contribute rating failed:', e)
     return json({ error: 'rating_failed', message: String(e?.message ?? e) }, 502, headers)
   }
 }
@@ -334,6 +407,7 @@ export default {
     try {
       if (url.pathname === '/book' && request.method === 'GET') return await handleBook(url, env, ip, headers)
       if (url.pathname === '/rate' && request.method === 'POST') return await handleRate(request, env, ip, headers)
+      if (url.pathname === '/contribute' && request.method === 'POST') return await handleContribute(request, env, ip, headers)
       if (url.pathname === '/') return json({ ok: true, service: 'smutseeker-api' }, 200, headers)
       return json({ error: 'not_found' }, 404, headers)
     } catch (e: any) {

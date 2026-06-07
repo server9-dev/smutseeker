@@ -2,11 +2,13 @@ import { useCallback, useState } from 'react'
 import { Scanner } from './Scanner'
 import { lookupIsbn } from './lookup'
 import { rateHeuristic } from './rating/heuristic'
-import { rateRemote, RateLimited } from './rating/remote'
+import { rateRemote, contributeReview, RateLimited } from './rating/remote'
 import type { Book, DimensionKey, Rating } from './types'
 import { DIMENSION_LABELS, SPICE_LABELS } from './types'
 
-type Phase = 'home' | 'scanning' | 'looking-up' | 'result' | 'notfound' | 'error'
+type Phase = 'home' | 'scanning' | 'looking-up' | 'result' | 'contribute' | 'error'
+
+const hasData = (b: Book) => Boolean(b.description?.trim() || b.categories.length)
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>('home')
@@ -15,14 +17,22 @@ export default function App() {
   const [error, setError] = useState('')
   const [manual, setManual] = useState('')
   const [aiState, setAiState] = useState<{ busy: boolean; note: string }>({ busy: false, note: '' })
+  const [pendingIsbn, setPendingIsbn] = useState('')
+  const [contribTitle, setContribTitle] = useState('')
+  const [contribText, setContribText] = useState('')
 
   const handleIsbn = useCallback(async (isbn: string) => {
     setPhase('looking-up')
     setError('')
     try {
       const found = await lookupIsbn(isbn)
-      if (!found) {
-        setPhase('notfound')
+      if (!found || !hasData(found)) {
+        // No usable data anywhere — offer to crowdsource a short description.
+        setPendingIsbn(isbn)
+        setContribTitle(found?.title && found.title !== 'Unknown title' ? found.title : '')
+        setContribText('')
+        setBook(found)
+        setPhase('contribute')
         return
       }
       setBook(found)
@@ -48,11 +58,34 @@ export default function App() {
     }
   }, [])
 
+  const submitContribution = useCallback(async () => {
+    const text = contribText.trim()
+    if (text.length < 10) return
+    setPhase('looking-up')
+    try {
+      const { book: b, rating: r } = await contributeReview(pendingIsbn, text, contribTitle.trim() || undefined)
+      setBook(b)
+      setRating(r)
+      setAiState({ busy: false, note: '' })
+      setPhase('result')
+    } catch (e) {
+      setError(
+        e instanceof RateLimited
+          ? `Rate limit reached — try again in ${e.retryAfter}s.`
+          : 'Could not submit. Please try again.',
+      )
+      setPhase('error')
+    }
+  }, [contribText, contribTitle, pendingIsbn])
+
   const reset = () => {
     setBook(null)
     setRating(null)
     setError('')
     setManual('')
+    setPendingIsbn('')
+    setContribTitle('')
+    setContribText('')
     setPhase('home')
   }
 
@@ -108,10 +141,29 @@ export default function App() {
         </div>
       )}
 
-      {phase === 'notfound' && (
-        <div className="card center stack">
-          <p>📭 No book found for that ISBN in Google Books.</p>
-          <button className="btn" onClick={reset}>Try another</button>
+      {phase === 'contribute' && (
+        <div className="card stack">
+          <p>
+            📭 No content info found{book?.title && book.title !== 'Unknown title' ? ` for “${book.title}”` : ` for ISBN ${pendingIsbn}`}.
+          </p>
+          <p className="meta">Add a short description of what's inside and we'll rate it — and save it so the next person sees it.</p>
+          <input
+            className="contrib-input"
+            placeholder="Title (optional)"
+            value={contribTitle}
+            onChange={(e) => setContribTitle(e.target.value)}
+          />
+          <textarea
+            className="contrib-input"
+            rows={4}
+            placeholder="e.g. Explicit sex scenes throughout, some graphic violence, frequent strong language."
+            value={contribText}
+            onChange={(e) => setContribText(e.target.value)}
+          />
+          <button className="btn btn-primary" disabled={contribText.trim().length < 10} onClick={submitContribution}>
+            🌶️ Rate it
+          </button>
+          <button className="btn ghost" onClick={reset}>Cancel</button>
         </div>
       )}
 
